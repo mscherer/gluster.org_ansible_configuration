@@ -1,0 +1,50 @@
+---
+- name: Make sure required packages are present
+  package:
+    name: '{{ item }}'
+    state: present
+  with_items:
+  - python-bugzilla
+  - git
+  - python-requests
+
+- name: Install web configuration
+  template:
+    dest: "/etc/nginx/conf.d/{{ server_name }}.conf"
+    src: nginx.conf
+  notify: restart nginx
+
+- name: Create {{ bugs_username }} to build
+  user:
+    name: "{{ bugs_username }}"
+    comment: "{{ server_name }} builder user"
+    home: "/srv/{{ server_name }}/html/"
+
+- name: Fix the selinux context
+  command: semanage fcontext -a -t httpd_user_rw_content_t /srv/{{ server_name }}/html/(/.*)?
+
+- name: Create the directory holding git checkout
+  file:
+    name: "/srv/{{ server_name }}/html/"
+    state: directory
+
+- name: Clone the repo
+  git:
+    repo: https://github.com/gluster/gluster-bugs-webui.git
+    dest: "/srv/{{ server_name }}/html/"
+  become: yes
+  become_user: "{{ bugs_username }}"
+  become_method: 'su'
+
+- name: Setup a cronjob every hour
+  cron:
+    minutes: 0
+    job: "/srv/{{ server_name }}/html/run-report.sh"
+    user: "{{ bugs_username }}"
+
+- name: Upgrade the code every day
+  cron:
+    minutes: 0
+    hour: 2
+    user: "{{ bugs_username }}"
+    job: "cd /srv/{{ server_name }}/html/ && git pull --rebase"
